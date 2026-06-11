@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kamal's State Download Map — A Long Talk</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson@3/dist/topojson.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── PIN GATE ── */
+#pin-gate {
+  position: fixed; inset: 0; z-index: 9999;
+  background: #050b15;
+  display: flex; align-items: center; justify-content: center;
+}
+.pin-box {
+  text-align: center; padding: 40px 32px;
+  background: #070f1e; border: 1px solid #1a2e48; border-radius: 16px;
+  width: 280px;
+}
+.pin-logo { font-size: 28px; margin-bottom: 16px; }
+.pin-title { font-size: 18px; font-weight: 900; color: #fff; margin-bottom: 6px; }
+.pin-sub { font-size: 12px; color: #5a7898; margin-bottom: 24px; }
+.pin-input {
+  width: 100%; padding: 12px 16px; background: #0a1628;
+  border: 1px solid #1a3050; border-radius: 8px;
+  font-size: 22px; color: #fff; text-align: center;
+  letter-spacing: 8px; outline: none; font-family: monospace;
+  margin-bottom: 12px;
+}
+.pin-input:focus { border-color: #1d4ed8; }
+.pin-input.shake { animation: sh 0.35s ease; }
+@keyframes sh {
+  0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-8px)} 40%,80%{transform:translateX(8px)}
+}
+.pin-err { font-size: 11px; color: #f08080; height: 16px; margin-bottom: 10px; }
+.pin-btn {
+  width: 100%; padding: 11px; background: #1d4ed8; border: none;
+  border-radius: 8px; color: #fff; font-size: 14px; font-weight: 800;
+  cursor: pointer; transition: opacity 0.15s;
+}
+.pin-btn:hover { opacity: 0.8; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #060d1a;
+  color: #f0f0f0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 13px 24px 11px;
+  border-bottom: 1px solid #0e1926;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  background: #050b15;
+}
+.header h1 { font-size: 16px; font-weight: 800; color: #fff; letter-spacing: -0.3px; }
+.header p  { font-size: 11px; color: #5a7898; margin-top: 2px; }
+.stats-bar { display: flex; gap: 18px; flex-wrap: wrap; }
+.stat      { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.stat-dot  { width: 8px; height: 8px; border-radius: 50%; }
+.stat-label { color: #7090b0; }
+.stat-value { color: #fff; font-weight: 800; min-width: 18px; }
+
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* MAP */
+.map-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 48% 54%, #0c1e3a 0%, #040a16 80%);
+}
+#map-svg { width: 100%; height: 100%; display: block; }
+
+/* LOADING */
+#loading {
+  position: absolute;
+  inset: 0;
+  background: #060d1a;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 10;
+}
+#loading.hidden { display: none; }
+.loader-ring {
+  width: 36px; height: 36px;
+  border: 2px solid #1a2a40;
+  border-top-color: #1d4ed8;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.load-txt { font-size: 11px; color: #5a7898; letter-spacing: 2px; text-transform: uppercase; }
+
+/* TOOLTIP */
+.tip {
+  position: absolute;
+  background: rgba(3,8,18,0.96);
+  border: 1px solid #1d4ed8;
+  border-radius: 7px;
+  padding: 9px 13px;
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+  z-index: 30;
+  max-width: 200px;
+}
+.tip.show { opacity: 1; }
+.tt-name  { font-weight: 800; color: #fff; font-size: 13px; }
+.tt-sub   { font-size: 10px; color: #6a8aaa; margin-top: 3px; }
+.tt-badge { font-size: 11px; color: #80b8ff; margin-top: 5px; }
+
+/* HINT */
+.map-hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: #5a7898;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  pointer-events: none;
+  animation: pulse 2.5s ease-in-out infinite;
+  white-space: nowrap;
+}
+@keyframes pulse { 0%,100%{opacity:0.3} 50%{opacity:0.9} }
+
+/* SIDE PANEL */
+.side-panel {
+  width: 308px;
+  border-left: 1px solid #0e1926;
+  background: #040911;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.panel-scroll {
+  overflow-y: auto;
+  flex: 1;
+  padding: 18px;
+}
+.panel-scroll::-webkit-scrollbar { width: 3px; }
+.panel-scroll::-webkit-scrollbar-thumb { background: #0e1926; border-radius: 2px; }
+
+/* placeholder */
+.ph { text-align: center; padding: 56px 16px 0; }
+.ph-icon { font-size: 28px; opacity: 0.2; margin-bottom: 12px; }
+.ph p { font-size: 12px; line-height: 1.7; color: #5a7898; }
+.ph small { font-size: 10px; color: #4a6080; display: block; margin-top: 10px; letter-spacing: 0.5px; }
+
+/* panel content */
+.p-name { font-size: 19px; font-weight: 900; color: #fff; letter-spacing: -0.4px; margin-bottom: 6px; }
+.p-chip {
+  display: inline-block;
+  font-size: 9px; font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 20px;
+  margin-bottom: 16px;
+}
+.chip-empty        { background: #0d1825; color: #2a3a55; border: 1px solid #162030; }
+.chip-has-connects { background: #0a1e50; color: #80b8ff;  border: 1px solid #1a4fd8; }
+.chip-in-progress  { background: #281300; color: #f5c842;  border: 1px solid #c97000; }
+.chip-downloaded   { background: #250000; color: #f08080;  border: 1px solid #c01c1c; }
+
+.mlbl { font-size: 9px; font-weight: 800; letter-spacing: 1.8px; text-transform: uppercase; color: #5a7898; margin-top: 16px; margin-bottom: 7px; }
+
+.c-list { list-style: none; }
+.c-list li {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 11.5px; color: #8ab0d0;
+  padding: 6px 0; border-bottom: 1px solid #0a1220; line-height: 1.4;
+}
+.c-list li:last-child { border-bottom: none; }
+.c-arr { color: #4a7fd8; font-size: 11px; flex-shrink: 0; margin-top: 1px; }
+.notes-p { font-size: 11px; color: #6a8aaa; line-height: 1.6; font-style: italic; }
+
+/* trigger questions */
+.q-box { background: #030810; border: 1px solid #0e1926; border-radius: 8px; padding: 12px; margin-top: 14px; }
+.q-title { font-size: 9px; font-weight: 800; letter-spacing: 1.8px; text-transform: uppercase; color: #5a7898; margin-bottom: 10px; }
+.q-row { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; border-bottom: 1px solid #0a1220; }
+.q-row:last-child { border-bottom: none; }
+.q-n {
+  min-width: 19px; height: 19px; border-radius: 50%;
+  font-size: 9px; font-weight: 900;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: #0a1e50; color: #80b8ff; border: 1px solid #1a4fd8;
+}
+.q-t { font-size: 11.5px; color: #8ab0d0; line-height: 1.5; }
+.q-t strong { color: #c0d8f0; }
+
+/* buttons — NO inline onclick, use data-action */
+.btns { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.btn {
+  width: 100%; padding: 10px 14px; border-radius: 7px;
+  font-size: 12px; font-weight: 800; cursor: pointer;
+  transition: opacity 0.12s, transform 0.1s;
+  text-align: center; border: 1px solid;
+  user-select: none;
+}
+.btn:hover  { opacity: 0.75; transform: translateY(-1px); }
+.btn:active { transform: translateY(0); opacity: 0.6; }
+.btn-start { background: #0a1e50; color: #80b8ff; border-color: #1a4fd8; }
+.btn-done  { background: #250000; color: #f08080; border-color: #c01c1c; }
+.btn-reset { background: #0d1825; color: #2a3a55; border-color: #162030; }
+
+/* progress */
+.prog-wrap { margin-top: 16px; padding-top: 14px; border-top: 1px solid #0a1220; }
+.prog-row  { display: flex; justify-content: space-between; font-size: 10px; color: #5a7898; margin-bottom: 5px; }
+.prog-row span:last-child { color: #7090b0; }
+.prog-bg   { background: #0a1220; border-radius: 3px; height: 4px; overflow: hidden; }
+.prog-fill { height: 100%; background: linear-gradient(90deg, #6b0000, #dc2626); border-radius: 3px; transition: width 0.5s ease; }
+
+/* legend */
+.legend {
+  padding: 9px 18px; border-top: 1px solid #0a1220;
+  display: flex; gap: 12px; flex-shrink: 0; background: #030810;
+}
+.leg-item { display: flex; align-items: center; gap: 5px; font-size: 9.5px; color: #6a88a8; }
+.leg-dot  { width: 7px; height: 7px; border-radius: 2px; }
+
+/* ── MOBILE ──────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  body { overflow: auto; height: auto; }
+
+  .header {
+    padding: 10px 14px 9px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .header h1 { font-size: 14px; }
+  .stats-bar { gap: 10px; }
+  .stat-label { display: none; }
+
+  .main { flex-direction: column; overflow: visible; height: auto; }
+
+  .map-wrap {
+    height: 56vw;
+    min-height: 200px;
+    max-height: 380px;
+    flex: none;
+  }
+
+  .side-panel {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid #0e1926;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .panel-scroll { overflow: visible; max-height: none; padding: 16px; }
+
+  .legend { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+
+  .map-hint { font-size: 10px; bottom: 8px; }
+
+  .btns .btn { padding: 12px 14px; font-size: 13px; }
+}
+</style>
+</head>
+<body>
+
+<div id="pin-gate">
+  <div class="pin-box">
+    <div class="pin-logo">🗺</div>
+    <div class="pin-title">Kamal's Download Map</div>
+    <div class="pin-sub">A Long Talk — Internal Tool</div>
+    <input id="pin-input" class="pin-input" type="password" inputmode="numeric"
+           maxlength="4" placeholder="••••" autocomplete="off">
+    <div class="pin-err" id="pin-err"></div>
+    <button class="pin-btn" id="pin-btn">Enter</button>
+  </div>
+</div>
+
+<div class="header">
+  <div>
+    <h1>Kamal's State Download Map</h1>
+    <p>Click any state · see contacts · mark it downloaded</p>
+  </div>
+  <div class="stats-bar">
+    <div class="stat">
+      <div class="stat-dot" style="background:#dc2626;box-shadow:0 0 5px rgba(220,38,38,.6)"></div>
+      <span class="stat-label">Downloaded</span>
+      <span class="stat-value" id="cnt-done">0</span>
+    </div>
+    <div class="stat">
+      <div class="stat-dot" style="background:#d97706;box-shadow:0 0 5px rgba(217,119,6,.6)"></div>
+      <span class="stat-label">In Progress</span>
+      <span class="stat-value" id="cnt-prog">0</span>
+    </div>
+    <div class="stat">
+      <div class="stat-dot" style="background:#1d4ed8;box-shadow:0 0 5px rgba(29,78,216,.6)"></div>
+      <span class="stat-label">Has Connects</span>
+      <span class="stat-value" id="cnt-conn">10</span>
+    </div>
+    <div class="stat">
+      <div class="stat-dot" style="background:#0d1825;border:1px solid #162030"></div>
+      <span class="stat-label">Empty</span>
+      <span class="stat-value" id="cnt-empty">41</span>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="map-wrap" id="map-wrap">
+    <div id="loading">
+      <div class="loader-ring"></div>
+      <div class="load-txt">Loading map</div>
+    </div>
+    <svg id="map-svg"></svg>
+    <div class="tip" id="tip"></div>
+    <div class="map-hint" id="map-hint">← Click any state to see contacts</div>
+  </div>
+
+  <div class="side-panel">
+    <div class="panel-scroll" id="panel-scroll">
+      <div class="ph" id="ph">
+        <div class="ph-icon">🗺</div>
+        <p>Click any state to see Kamal's contacts and the download trigger questions.</p>
+        <small>Blue glow = has connects &nbsp;·&nbsp; Red glow = downloaded</small>
+      </div>
+      <div id="panel-body"></div>
+    </div>
+    <div class="legend">
+      <div class="leg-item"><div class="leg-dot" style="background:#dc2626"></div>Downloaded</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#d97706"></div>In Progress</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#1d4ed8"></div>Has Connects</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#0d1825;border:1px solid #162030"></div>Empty</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── PIN GATE ────────────────────────────────────────────────────────────────
+const PIN = '2026'; // ← change this to any 4-digit code
+
+(function() {
+  if (sessionStorage.getItem('alt-map-unlocked') === '1') {
+    document.getElementById('pin-gate').style.display = 'none';
+    return;
+  }
+  const inp = document.getElementById('pin-input');
+  const err = document.getElementById('pin-err');
+  const btn = document.getElementById('pin-btn');
+
+  function tryPin() {
+    if (inp.value === PIN) {
+      sessionStorage.setItem('alt-map-unlocked', '1');
+      document.getElementById('pin-gate').style.display = 'none';
+    } else {
+      err.textContent = 'Incorrect PIN. Try again.';
+      inp.classList.add('shake');
+      inp.value = '';
+      setTimeout(() => inp.classList.remove('shake'), 400);
+    }
+  }
+
+  btn.addEventListener('click', tryPin);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') tryPin(); });
+  inp.focus();
+})();
+
+// ─── STATE DATA ───────────────────────────────────────────────────────────────
+const SD = {
+  AK:{ name:"Alaska",          status:"empty", contacts:[], notes:"" },
+  AL:{ name:"Alabama",         status:"empty", contacts:[], notes:"" },
+  AR:{ name:"Arkansas",        status:"empty", contacts:[], notes:"" },
+  AZ:{ name:"Arizona",         status:"empty", contacts:[], notes:"" },
+  CA:{ name:"California",      status:"empty", contacts:[], notes:"" },
+  CO:{ name:"Colorado",        status:"empty", contacts:[], notes:"" },
+  CT:{ name:"Connecticut",     status:"empty", contacts:[], notes:"" },
+  DC:{ name:"Washington D.C.", status:"has-connects",
+    contacts:["Washington Nationals — Jasmine Williams (1 event done, partnership evolving)",
+              "Jennifer De Leon / ELCA — DC meeting June 14 (active)"],
+    notes:"Two tracks in DC: sports (Nationals) and faith (ELCA). Jennifer meeting is one of the most strategic relational moves of June." },
+  DE:{ name:"Delaware",        status:"empty", contacts:[], notes:"" },
+  FL:{ name:"Florida",         status:"empty", contacts:[], notes:"" },
+  GA:{ name:"Georgia",         status:"has-connects",
+    contacts:["King Center — Angelo Martinez & Dameon Madison","Civil Rights Pilgrimage connection"],
+    notes:"Active, evolving relationship. Multiple planning meetings. The King Center opens faith and civic doors ALT cannot knock on directly." },
+  HI:{ name:"Hawaii",          status:"empty", contacts:[], notes:"" },
+  IA:{ name:"Iowa",            status:"empty", contacts:[], notes:"" },
+  ID:{ name:"Idaho",           status:"empty", contacts:[], notes:"" },
+  IL:{ name:"Illinois",        status:"empty", contacts:[], notes:"" },
+  IN:{ name:"Indiana",         status:"empty", contacts:[], notes:"" },
+  KS:{ name:"Kansas",          status:"empty", contacts:[], notes:"" },
+  KY:{ name:"Kentucky",        status:"empty", contacts:[], notes:"" },
+  LA:{ name:"Louisiana",       status:"empty", contacts:[], notes:"" },
+  MA:{ name:"Massachusetts",   status:"has-connects",
+    contacts:["PHWL — Boston Fleet (active collaboration, expansion planned)"],
+    notes:"Live partnership with PHWL Boston Fleet. Next step: identify the next team or engagement format." },
+  MD:{ name:"Maryland",        status:"empty", contacts:[], notes:"" },
+  ME:{ name:"Maine",           status:"empty", contacts:[], notes:"" },
+  MI:{ name:"Michigan",        status:"empty", contacts:[], notes:"" },
+  MN:{ name:"Minnesota",       status:"empty", contacts:[], notes:"" },
+  MO:{ name:"Missouri",        status:"empty", contacts:[], notes:"" },
+  MS:{ name:"Mississippi",     status:"empty", contacts:[], notes:"" },
+  MT:{ name:"Montana",         status:"empty", contacts:[], notes:"" },
+  NC:{ name:"North Carolina",  status:"empty", contacts:[], notes:"" },
+  ND:{ name:"North Dakota",    status:"empty", contacts:[], notes:"" },
+  NE:{ name:"Nebraska",        status:"empty", contacts:[], notes:"" },
+  NH:{ name:"New Hampshire",   status:"has-connects",
+    contacts:["Anne (UU New Hampshire) — active contact, existing foundation"],
+    notes:"Active UU relationship. Anne is the anchor. Use her to identify the next layer of UU leaders in NH and New England." },
+  NJ:{ name:"New Jersey",      status:"empty", contacts:[], notes:"" },
+  NM:{ name:"New Mexico",      status:"empty", contacts:[], notes:"" },
+  NV:{ name:"Nevada",          status:"empty", contacts:[], notes:"" },
+  NY:{ name:"New York",        status:"has-connects",
+    contacts:["NY Secret Ops — Methodist grassroots group (active, needs org structure)",
+              "Buffalo Sabres — Emily (warm, follow-ups progressing)",
+              "PHWL New York Sirens (active collaboration)"],
+    notes:"Three active tracks. NY Secret Ops are already overcoming church resistance — link them to Tanya. Buffalo Sabres: confirm Emily's last name and confirm next step." },
+  OH:{ name:"Ohio",            status:"empty", contacts:[], notes:"" },
+  OK:{ name:"Oklahoma",        status:"empty", contacts:[], notes:"" },
+  OR:{ name:"Oregon",          status:"has-connects",
+    contacts:["Dave Midden — HOT PROSPECT, budget approval is the only barrier",
+              "University of Oregon — Maria Kalnbach (fall campus visit planned)"],
+    notes:"PRIORITY STATE. Dave Midden is one of the hottest closes in the portfolio — budget is the only gap. U of O fall visit targeted Sept/Oct." },
+  PA:{ name:"Pennsylvania",    status:"has-connects",
+    contacts:["Penn Alumni Relations — ebetz@upenn.edu + dalconzo@upenn.edu",
+              "Penn Athletics (referenced — door to open next)"],
+    notes:"June 4 Zoom at 1:15pm. ebetz said 'This certainly won't be the last time we get together.' Ivy League door: Alumni Relations → Athletics → DEI → beyond." },
+  RI:{ name:"Rhode Island",    status:"empty", contacts:[], notes:"" },
+  SC:{ name:"South Carolina",  status:"has-connects",
+    contacts:["Mark Prosser — Deacon / Bishop's Chief of Staff & Chancellor (SC Diocese)",
+              "USCCB referral pathway — Mark as reference, national-level play"],
+    notes:"Reconnected June 1 after 6 years. Manages budgets + personnel across 24 counties. Prior successful training. Catholic Charities lost 80-90% federal funding — they need programming partners." },
+  SD:{ name:"South Dakota",    status:"empty", contacts:[], notes:"" },
+  TN:{ name:"Tennessee",       status:"empty", contacts:[], notes:"" },
+  TX:{ name:"Texas",           status:"has-connects",
+    contacts:["Dallas Mavericks — Patricia Mowberry (cold, elusive)"],
+    notes:"One more direct outreach. If no response, flag for Osei to find a different entry point. Texas is a major market worth exploring beyond the Mavericks." },
+  UT:{ name:"Utah",            status:"empty", contacts:[], notes:"" },
+  VA:{ name:"Virginia",        status:"empty", contacts:[], notes:"" },
+  VT:{ name:"Vermont",         status:"empty", contacts:[], notes:"" },
+  WA:{ name:"Washington",      status:"has-connects",
+    contacts:["Seattle Kraken (NHL) — $10K quoted, budget approval pending",
+              "University of Washington — inactive, monitoring for referrals"],
+    notes:"PRIORITY STATE. Kraken is named, scoped, and quoted — budget approval is the only gap. This is a close, not a prospect." },
+  WI:{ name:"Wisconsin",       status:"empty", contacts:[], notes:"" },
+  WV:{ name:"West Virginia",   status:"empty", contacts:[], notes:"" },
+  WY:{ name:"Wyoming",         status:"empty", contacts:[], notes:"" },
+};
+
+const FIPS = {
+  "01":"AL","02":"AK","04":"AZ","05":"AR","06":"CA","08":"CO","09":"CT",
+  "10":"DE","11":"DC","12":"FL","13":"GA","15":"HI","16":"ID","17":"IL",
+  "18":"IN","19":"IA","20":"KS","21":"KY","22":"LA","23":"ME","24":"MD",
+  "25":"MA","26":"MI","27":"MN","28":"MS","29":"MO","30":"MT","31":"NE",
+  "32":"NV","33":"NH","34":"NJ","35":"NM","36":"NY","37":"NC","38":"ND",
+  "39":"OH","40":"OK","41":"OR","42":"PA","44":"RI","45":"SC","46":"SD",
+  "47":"TN","48":"TX","49":"UT","50":"VT","51":"VA","53":"WA","54":"WV",
+  "55":"WI","56":"WY"
+};
+
+const OFF = {
+  NH:[11,-3], VT:[2,2], MA:[13,-7], RI:[11,4],
+  CT:[0,4], NJ:[11,1], DE:[10,5], MD:[22,5], MI:[-16,20]
+};
+
+const STATUS_COLORS = {
+  fill:   { empty:'#0d1825', 'has-connects':'#0a1e50', 'in-progress':'#281300', downloaded:'#250000' },
+  stroke: { empty:'#162030', 'has-connects':'#1a4fd8', 'in-progress':'#c97000', downloaded:'#c01c1c' },
+  lbl:    { empty:'#1c2d40', 'has-connects':'#80b8ff', 'in-progress':'#f5c842', downloaded:'#f08080' },
+  glow:   { empty:'none',
+            'has-connects':'drop-shadow(0 0 5px rgba(29,78,216,0.7))',
+            'in-progress':'drop-shadow(0 0 5px rgba(201,112,0,0.7))',
+            downloaded:'drop-shadow(0 0 5px rgba(192,28,28,0.7))' }
+};
+
+const CHIP_CLASS = {
+  empty:'chip-empty', 'has-connects':'chip-has-connects',
+  'in-progress':'chip-in-progress', downloaded:'chip-downloaded'
+};
+const CHIP_LABEL = {
+  empty:'No Connects Yet', 'has-connects':'Has Connects',
+  'in-progress':'In Progress', downloaded:'Downloaded ✓'
+};
+
+// ─── PERSISTENCE ─────────────────────────────────────────────────────────────
+(function(){
+  try {
+    const saved = localStorage.getItem('alt-kamal-v4');
+    if (saved) {
+      const d = JSON.parse(saved);
+      Object.keys(d).forEach(a => { if (SD[a]) SD[a].status = d[a]; });
+    }
+  } catch(e) { console.warn('Could not load saved state', e); }
+})();
+
+function persist() {
+  try {
+    const o = {};
+    Object.keys(SD).forEach(a => { o[a] = SD[a].status; });
+    localStorage.setItem('alt-kamal-v4', JSON.stringify(o));
+  } catch(e) {}
+}
+
+// ─── MAP SETUP ────────────────────────────────────────────────────────────────
+const wrap  = document.getElementById('map-wrap');
+const tipEl = document.getElementById('tip');
+let W = wrap.clientWidth, H = wrap.clientHeight;
+
+const svg = d3.select('#map-svg').attr('viewBox', `0 0 ${W} ${H}`).attr('width', W).attr('height', H);
+
+const defs = svg.append('defs');
+const og = defs.append('radialGradient').attr('id','og').attr('cx','48%').attr('cy','52%').attr('r','65%');
+og.append('stop').attr('offset','0%').attr('stop-color','#0b1d38');
+og.append('stop').attr('offset','100%').attr('stop-color','#030910');
+svg.append('rect').attr('width', W).attr('height', H).attr('fill', 'url(#og)');
+
+const gMap  = svg.append('g');
+const proj  = d3.geoAlbersUsa().scale(W * 1.22).translate([W/2, H/2]);
+const pathFn = d3.geoPath().projection(proj);
+
+let pathSel = null, lblSel = null, selAbbr = null;
+
+function getAbbr(id)   { return FIPS[String(id).padStart(2,'0')]; }
+function getStatus(a)  { return SD[a]?.status || 'empty'; }
+
+// ─── APPLY VISUAL STATE TO A SINGLE PATH ─────────────────────────────────────
+function applyPathStyle(sel, isSelected) {
+  sel.each(function(d) {
+    const a = getAbbr(d.id);
+    const s = getStatus(a);
+    const node = d3.select(this);
+    node
+      .style('fill',         STATUS_COLORS.fill[s])
+      .style('stroke',       isSelected && a === selAbbr ? '#ffffff' : STATUS_COLORS.stroke[s])
+      .style('stroke-width', isSelected && a === selAbbr ? '2.5'     : (s === 'empty' ? '0.5' : '1.4'))
+      .style('filter',       STATUS_COLORS.glow[s]);
+  });
+}
+
+// ─── APPLY VISUAL STATE TO ALL LABELS ────────────────────────────────────────
+function applyLabelStyle() {
+  if (!lblSel) return;
+  lblSel.each(function(d) {
+    const a = getAbbr(d.id);
+    d3.select(this).style('fill', STATUS_COLORS.lbl[getStatus(a)]);
+  });
+}
+
+// ─── LOAD MAP ────────────────────────────────────────────────────────────────
+d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(function(us) {
+  const statesGeo = topojson.feature(us, us.objects.states);
+  const borders   = topojson.mesh(us, us.objects.states, (a,b) => a !== b);
+  const outline   = topojson.mesh(us, us.objects.states, (a,b) => a === b);
+
+  // Outer nation outline
+  gMap.append('path').datum(outline)
+    .style('fill','none')
+    .style('stroke','#1a2e48')
+    .style('stroke-width','1.2')
+    .style('pointer-events','none')
+    .attr('d', pathFn);
+
+  // State fills — main interactive layer
+  pathSel = gMap.selectAll('.sp')
+    .data(statesGeo.features)
+    .join('path')
+    .attr('class', 'sp')
+    .attr('d', pathFn)
+    .style('cursor', 'pointer');
+
+  // Apply initial styles
+  applyPathStyle(pathSel, false);
+
+  // Mouse events
+  pathSel
+    .on('mouseover', function(event, d) {
+      const a = getAbbr(d.id);
+      if (!a || !SD[a]) return;
+      const data = SD[a];
+      tipEl.innerHTML = `
+        <div class="tt-name">${data.name}</div>
+        <div class="tt-sub">${CHIP_LABEL[data.status]}</div>
+        ${data.contacts.length
+          ? `<div class="tt-badge">↗ ${data.contacts.length} contact${data.contacts.length > 1 ? 's' : ''} on file — click to see</div>`
+          : '<div class="tt-sub" style="margin-top:5px">No contacts yet — click to sweep</div>'}
+      `;
+      tipEl.classList.add('show');
+    })
+    .on('mousemove', function(event) {
+      const [mx, my] = d3.pointer(event, wrap);
+      const tw = tipEl.offsetWidth;
+      tipEl.style.left = (mx > W - tw - 20 ? mx - tw - 14 : mx + 14) + 'px';
+      tipEl.style.top  = (my + 16) + 'px';
+    })
+    .on('mouseout', function() {
+      tipEl.classList.remove('show');
+    })
+    .on('click', function(event, d) {
+      const a = getAbbr(d.id);
+      if (a) selectState(a);
+    });
+
+  // Internal borders (non-interactive overlay)
+  gMap.append('path').datum(borders)
+    .style('fill','none')
+    .style('stroke','#111e2e')
+    .style('stroke-width','0.35')
+    .style('pointer-events','none')
+    .attr('d', pathFn);
+
+  // State labels
+  lblSel = gMap.selectAll('.sl')
+    .data(statesGeo.features)
+    .join('text')
+    .attr('class', 'sl')
+    .attr('transform', d => {
+      const a = getAbbr(d.id);
+      const c = pathFn.centroid(d);
+      if (!c || isNaN(c[0])) return 'translate(-9999,-9999)';
+      const [ox, oy] = OFF[a] || [0,0];
+      return `translate(${c[0]+ox},${c[1]+oy})`;
+    })
+    .attr('font-family', '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif')
+    .attr('font-weight', '900')
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .attr('paint-order', 'stroke fill')
+    .attr('stroke', 'rgba(0,0,0,0.5)')
+    .attr('stroke-width', '2')
+    .style('pointer-events', 'none')
+    .attr('font-size', d => {
+      const area = pathFn.area(d);
+      if (area < 100) return '7px';
+      if (area < 600) return '8.5px';
+      return '10px';
+    })
+    .text(d => getAbbr(d.id) || '');
+
+  applyLabelStyle();
+
+  // Hide loading
+  document.getElementById('loading').classList.add('hidden');
+  updateStats();
+
+}).catch(function(err) {
+  console.error('Map load failed:', err);
+  const lo = document.getElementById('loading');
+  lo.querySelector('.load-txt').textContent = 'Map load failed — check internet';
+  lo.querySelector('.loader-ring').style.display = 'none';
+});
+
+// ─── SELECT STATE ─────────────────────────────────────────────────────────────
+function selectState(a) {
+  if (!SD[a]) return;
+  selAbbr = a;
+
+  // Hide hint
+  document.getElementById('map-hint').style.display = 'none';
+
+  // Restyle all paths (selected one gets white border)
+  if (pathSel) applyPathStyle(pathSel, true);
+
+  // Render panel
+  renderPanel(a);
+}
+
+function renderPanel(a) {
+  const data = SD[a];
+
+  document.getElementById('ph').style.display = 'none';
+  const pb = document.getElementById('panel-body');
+
+  // Contacts block
+  let contactsHTML = '';
+  if (data.contacts.length > 0) {
+    const items = data.contacts.map(c => `<li><span class="c-arr">→</span>${c}</li>`).join('');
+    contactsHTML = `
+      <div class="mlbl">Contacts on File</div>
+      <ul class="c-list">${items}</ul>
+      ${data.notes ? `<div class="mlbl">COO Notes</div><p class="notes-p">${data.notes}</p>` : ''}
+    `;
+  } else {
+    contactsHTML = `<p class="notes-p" style="margin-top:10px;">No contacts logged yet. Ask Kamal — there may be hidden connections in ${data.name} that haven't surfaced.</p>`;
+  }
+
+  // Questions
+  const sweep = data.contacts.length === 0 && data.status !== 'downloaded';
+  const qHTML = sweep
+    ? `<div class="q-box">
+        <div class="q-title">Quick Sweep Questions</div>
+        <div class="q-row"><div class="q-n">1</div><div class="q-t">Do you have any connects in <strong>${data.name}</strong>?</div></div>
+        <div class="q-row"><div class="q-n">2</div><div class="q-t">Anyone met at a conference, event, or referral who's based there?</div></div>
+       </div>`
+    : `<div class="q-box">
+        <div class="q-title">Download Trigger Questions</div>
+        <div class="q-row"><div class="q-n">1</div><div class="q-t">What do we have <strong>actively working</strong> in ${data.name} right now?</div></div>
+        <div class="q-row"><div class="q-n">2</div><div class="q-t">What's <strong>in the pipeline</strong> — moving but not closed?</div></div>
+        <div class="q-row"><div class="q-n">3</div><div class="q-t">What's something in ${data.name} that <strong>Kyle doesn't even know about?</strong></div></div>
+       </div>`;
+
+  // Buttons — use data-action, NOT onclick= (event delegation handles these)
+  let btnsHTML = '';
+  if (data.status === 'downloaded') {
+    btnsHTML = `<div class="btns">
+      <button class="btn btn-reset" data-action="has-connects">↩ Mark Not Complete</button>
+    </div>`;
+  } else if (sweep) {
+    btnsHTML = `<div class="btns">
+      <button class="btn btn-start" data-action="in-progress">▶ Start Sweep</button>
+      <button class="btn btn-done"  data-action="downloaded">✓ Confirmed Empty</button>
+    </div>`;
+  } else {
+    btnsHTML = `<div class="btns">
+      <button class="btn btn-start" data-action="in-progress">▶ Start Download Session</button>
+      <button class="btn btn-done"  data-action="downloaded">✓ Mark as Downloaded</button>
+    </div>`;
+  }
+
+  const done  = Object.values(SD).filter(s => s.status === 'downloaded').length;
+  const total = Object.keys(SD).length;
+  const pct   = Math.round(done / total * 100);
+
+  pb.innerHTML = `
+    <div class="p-name">${data.name}</div>
+    <span class="p-chip ${CHIP_CLASS[data.status]}">${CHIP_LABEL[data.status]}</span>
+    ${contactsHTML}
+    ${qHTML}
+    ${btnsHTML}
+    <div class="prog-wrap">
+      <div class="prog-row"><span>Overall Progress</span><span>${done} / ${total} states</span></div>
+      <div class="prog-bg"><div class="prog-fill" style="width:${pct}%"></div></div>
+    </div>
+  `;
+
+  document.getElementById('panel-scroll').scrollTop = 0;
+}
+
+// ─── PANEL BUTTON HANDLER (event delegation — survives innerHTML replacement) ──
+document.getElementById('panel-body').addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-action]');
+  if (!btn || !selAbbr) return;
+  const newStatus = btn.dataset.action;
+  SD[selAbbr].status = newStatus;
+  persist();
+  if (pathSel) applyPathStyle(pathSel, true);
+  applyLabelStyle();
+  updateStats();
+  renderPanel(selAbbr);
+});
+
+// ─── STATS ────────────────────────────────────────────────────────────────────
+function updateStats() {
+  const v = Object.values(SD);
+  document.getElementById('cnt-done').textContent  = v.filter(s => s.status === 'downloaded').length;
+  document.getElementById('cnt-prog').textContent  = v.filter(s => s.status === 'in-progress').length;
+  document.getElementById('cnt-conn').textContent  = v.filter(s => s.status === 'has-connects').length;
+  document.getElementById('cnt-empty').textContent = v.filter(s => s.status === 'empty').length;
+}
+updateStats();
+
+// ─── RESIZE ───────────────────────────────────────────────────────────────────
+window.addEventListener('resize', function() {
+  W = wrap.clientWidth; H = wrap.clientHeight;
+  svg.attr('viewBox', `0 0 ${W} ${H}`).attr('width', W).attr('height', H);
+  svg.select('rect').attr('width', W).attr('height', H);
+  proj.scale(W * 1.22).translate([W/2, H/2]);
+  gMap.selectAll('path').attr('d', pathFn);
+  if (lblSel) {
+    lblSel.attr('transform', function(d) {
+      const a = getAbbr(d.id);
+      const c = pathFn.centroid(d);
+      if (!c || isNaN(c[0])) return 'translate(-9999,-9999)';
+      const [ox, oy] = OFF[a] || [0,0];
+      return `translate(${c[0]+ox},${c[1]+oy})`;
+    });
+  }
+});
+</script>
+</body>
+</html>
